@@ -1,7 +1,7 @@
 /*!
  * \file      main.c
  *
- * \brief     LoRaMac classA device implementation
+ * \brief     LoRaMac classC device implementation
  *
  * \copyright Revised BSD License, see section \ref LICENSE.
  *
@@ -21,11 +21,9 @@
  * \author    Gregory Cristian ( Semtech )
  *
  * \author    Andreas Pella (IMST GmbH)
- *
- * \author    Zhang Huanjie ( USTC )
  */
 
-/*! \file classA/LoRaKit151/main.c */
+/*! \file classC/LoRaKit151/main.c */
 
 #include <stdio.h>
 #include "utilities.h"
@@ -147,20 +145,14 @@ static uint32_t TxDutyCycleTime;
 static TimerEvent_t TxNextPacketTimer;
 
 /*!
- * Timer to handle the state of LED1
- */
-static TimerEvent_t Led1Timer;
-
-/*!
- * LED GPIO pins objects
- */
-extern Gpio_t Led1;
-int Led1On = 0;
-
-/*!
  * Specifies the state of the application LED
  */
 static bool AppLedStateOn = false;
+
+/*!
+ * Timer to handle the state of LED1
+ */
+static TimerEvent_t Led1Timer;
 
 /*!
  * Indicates if a new packet can be sent
@@ -233,6 +225,11 @@ LoRaMacHandlerAppData_t AppData =
 };
 
 /*!
+ * LED GPIO pins objects
+ */
+extern Gpio_t Led1;
+
+/*!
  * MAC status strings
  */
 const char* MacStatusStrings[] =
@@ -286,18 +283,6 @@ const char* EventInfoStatusStrings[] =
     "Beacon lost",                   // LORAMAC_EVENT_INFO_STATUS_BEACON_LOST
     "Beacon not found"               // LORAMAC_EVENT_INFO_STATUS_BEACON_NOT_FOUND
 };
-
-/*!
- * \brief Function executed on Led 1 Timeout event
- */
-static void OnLed1TimerEvent( void* context )
-{
-    TimerStop( &Led1Timer );
-    // Toggle LED 1 On/Off
-    Led1On = Led1On ^ 1;
-    GpioWrite( &Led1, Led1On );
-    TimerStart( &Led1Timer );
-}
 
 /*!
  * Prints the provided buffer in HEX
@@ -495,6 +480,16 @@ static void OnTxNextPacketTimerEvent( void* context )
 }
 
 /*!
+ * \brief Function executed on Led 1 Timeout event
+ */
+static void OnLed1TimerEvent( void* context )
+{
+    TimerStop( &Led1Timer );
+    // Switch LED 1 OFF
+    GpioWrite( &Led1, 0 );
+}
+
+/*!
  * \brief   MCPS-Confirm event function
  *
  * \param   [IN] mcpsConfirm - Pointer to the confirm structure,
@@ -533,6 +528,9 @@ static void McpsConfirm( McpsConfirm_t *mcpsConfirm )
                 break;
         }
 
+        // Switch LED 1 ON
+        GpioWrite( &Led1, 1 );
+        TimerStart( &Led1Timer );
     }
     MibRequestConfirm_t mibGet;
     MibRequestConfirm_t mibReq;
@@ -666,6 +664,7 @@ static void McpsIndication( McpsIndication_t *mcpsIndication )
             if( mcpsIndication->BufferSize == 1 )
             {
                 AppLedStateOn = mcpsIndication->Buffer[0] & 0x01;
+                GpioWrite( &Led1, ( ( AppLedStateOn & 0x01 ) != 0 ) ? 1 : 0 );
             }
             break;
         case 224:
@@ -814,6 +813,10 @@ static void McpsIndication( McpsIndication_t *mcpsIndication )
         }
     }
 
+    // Switch LED 1 ON for each received downlink
+    GpioWrite( &Led1, 1 );
+    TimerStart( &Led1Timer );
+
     const char *slotStrings[] = { "1", "2", "C", "C Multicast", "B Ping-Slot", "B Multicast Ping-Slot" };
 
     printf( "\r\n###### ===== DOWNLINK FRAME %lu ==== ######\r\n", mcpsIndication->DownLinkCounter );
@@ -954,15 +957,6 @@ int main( void )
     macCallbacks.NvmContextChange = NvmCtxMgmtEvent;
     macCallbacks.MacProcessNotify = OnMacProcessNotify;
 
-    // LED Timer
-    TimerInit( &Led1Timer, OnLed1TimerEvent );
-    TimerSetValue( &Led1Timer, 1 );
-
-    // Switch LED 1 ON
-    Led1On = 1;
-    GpioWrite( &Led1, Led1On);
-    TimerStart( &Led1Timer );
-
     status = LoRaMacInitialization( &macPrimitives, &macCallbacks, ACTIVE_REGION );
     if ( status != LORAMAC_STATUS_OK )
     {
@@ -973,27 +967,9 @@ int main( void )
         }
     }
 
-// Only use CN470 channel 80 - 87 
-
-#if defined( REGION_CN470 )
-    ChanMaskSetParams_t cn470_chan_80_87;
-    uint16_t cn470_chanmask_80_87 [ 6 ];
-
-    cn470_chanmask_80_87[0]=0x0000;
-    cn470_chanmask_80_87[1]=0x0000;
-    cn470_chanmask_80_87[2]=0x0000;
-    cn470_chanmask_80_87[3]=0x0000;
-    cn470_chanmask_80_87[4]=0x0000;
-    cn470_chanmask_80_87[5]=0x00ff;
-
-    cn470_chan_80_87.ChannelsMaskType = CHANNELS_MASK;
-    cn470_chan_80_87.ChannelsMaskIn = cn470_chanmask_80_87;
-    RegionCN470ChanMaskSet(&cn470_chan_80_87);
-#endif
-
     DeviceState = DEVICE_STATE_RESTORE;
 
-    printf( "###### ===== ClassA demo application v1.0.0 ==== ######\r\n\r\n" );
+    printf( "###### ===== ClassC demo application v1.0.0 ==== ######\r\n\r\n" );
 
     while( 1 )
     {
@@ -1098,6 +1074,9 @@ int main( void )
             {
                 TimerInit( &TxNextPacketTimer, OnTxNextPacketTimerEvent );
 
+                TimerInit( &Led1Timer, OnLed1TimerEvent );
+                TimerSetValue( &Led1Timer, 25 );
+
                 mibReq.Type = MIB_PUBLIC_NETWORK;
                 mibReq.Param.EnablePublicNetwork = LORAWAN_PUBLIC_NETWORK;
                 LoRaMacMibSetRequestConfirm( &mibReq );
@@ -1187,6 +1166,15 @@ int main( void )
             {
                 if( NextTx == true )
                 {
+                    mibReq.Type = MIB_DEVICE_CLASS;
+                    LoRaMacMibGetRequestConfirm( &mibReq );
+
+                    if( mibReq.Param.Class!= CLASS_C )
+                    {
+                        mibReq.Param.Class = CLASS_C;
+                        LoRaMacMibSetRequestConfirm( &mibReq );
+                    }
+
                     PrepareTxFrame( AppPort );
 
                     NextTx = SendFrame( );
